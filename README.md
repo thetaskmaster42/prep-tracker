@@ -65,6 +65,21 @@ kubectl apply -f k8s/
 `replicas: 1` — don't scale it out, since multiple pods writing to the same file over
 shared storage will corrupt it. If you outgrow that, swap SQLite for Postgres first.
 
+## CI/CD
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push/PR to `main`:
+
+1. **test** — `uv sync --frozen` + `uv run pytest`.
+2. **docker** — builds the image with Buildx (validates the Dockerfile on PRs too).
+   On pushes to `main`, after tests pass, it also pushes to
+   `ghcr.io/thetaskmaster42/prep-tracker`, tagged with the branch, short commit SHA,
+   and `latest`. No secrets to configure — it authenticates with the automatic
+   `GITHUB_TOKEN`. `k8s/deployment.yaml` already points at that image.
+
+   The GHCR package may start **private**; if `kubectl` can't pull it, flip its
+   visibility to public (or add an `imagePullSecret`) from the package settings on
+   GitHub.
+
 ## API
 
 | Method | Path                           | Purpose                                         |

@@ -20,8 +20,8 @@ spec:
     spec:
       containers:
         - name: prep-tracker
-          image: prep-tracker:latest
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/thetaskmaster42/prep-tracker:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8000
           env:
