@@ -1,0 +1,55 @@
+# SQLite-backed app: keep replicas at 1. Scaling out would give each pod its
+# own view of a shared file on ReadWriteOnce storage and corrupt writes.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prep-tracker
+  labels:
+    app: prep-tracker
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: prep-tracker
+  template:
+    metadata:
+      labels:
+        app: prep-tracker
+    spec:
+      containers:
+        - name: prep-tracker
+          image: prep-tracker:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: PREP_TRACKER_DB
+              value: /data/prep_tracker.db
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: prep-tracker-data

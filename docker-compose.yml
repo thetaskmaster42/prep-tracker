@@ -1,0 +1,17 @@
+services:
+  prep-tracker:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - prep-tracker-data:/data
+    environment:
+      - PREP_TRACKER_DB=/data/prep_tracker.db
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+
+volumes:
+  prep-tracker-data:
