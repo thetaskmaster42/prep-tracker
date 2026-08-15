@@ -25,8 +25,8 @@ spec:
           ports:
             - containerPort: 8000
           env:
-            - name: PREP_TRACKER_DB
-              value: /data/prep_tracker.db
+            - name: DATABASE_URL
+              value: sqlite:////data/prep_tracker.db
           volumeMounts:
             - name: data
               mountPath: /data

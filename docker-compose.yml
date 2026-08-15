@@ -6,7 +6,7 @@ services:
     volumes:
       - prep-tracker-data:/data
     environment:
-      - PREP_TRACKER_DB=/data/prep_tracker.db
+      - DATABASE_URL=sqlite:////data/prep_tracker.db
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
       interval: 30s
