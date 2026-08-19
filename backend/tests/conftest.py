@@ -3,9 +3,10 @@ import tempfile
 from pathlib import Path
 
 # Must be set before any app module is imported, since config reads it at import time
-# to decide where the database lives.
+# to decide where the database lives. CI can inject DATABASE_URL to run the suite against
+# a real Postgres (dialect-drift guard); otherwise we default to a throwaway SQLite file.
 _tmp_dir = tempfile.TemporaryDirectory()
-os.environ["DATABASE_URL"] = f"sqlite:///{Path(_tmp_dir.name) / 'test.db'}"
+os.environ.setdefault("DATABASE_URL", f"sqlite:///{Path(_tmp_dir.name) / 'test.db'}")
 
 import pytest
 from fastapi.testclient import TestClient

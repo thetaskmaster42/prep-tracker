@@ -1,0 +1,40 @@
+# Runs `alembic upgrade head` exactly once per deploy, so the app pods never race on
+# schema migrations. Annotated as an Argo CD pre-sync hook (runs before the Deployment on
+# each sync and is recreated each time); with plain kubectl, apply/complete this Job before
+# applying the Deployment — see the README.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: prep-tracker-migrate
+  labels:
+    app: prep-tracker
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: prep-tracker
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: ghcr.io/thetaskmaster42/prep-tracker:latest
+          imagePullPolicy: Always
+          command: ["alembic", "upgrade", "head"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: prep-tracker-db-app
+                  key: uri
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

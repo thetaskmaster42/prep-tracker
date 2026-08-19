@@ -1,15 +1,15 @@
 """SQLAlchemy ORM models.
 
-Table and column names mirror the original hand-written SQLite schema exactly, so an
-existing ``prep_tracker.db`` keeps working after ``alembic stamp head``.
+Column semantics mirror the original schema, but defaults use dialect-portable constructs
+(``func.now()``, ``false()``) so the same models run on SQLite and Postgres.
 """
 
-from sqlalchemy import Boolean, Index, Integer, String, Text, text
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, Index, Integer, String, Text, false, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
-
-_NOW = text("(datetime('now'))")
 
 
 class Task(Base):
@@ -25,10 +25,12 @@ class Task(Base):
         Integer, nullable=False, default=0, server_default="0"
     )
     done: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default="0"
+        Boolean, nullable=False, default=False, server_default=false()
     )
     notes: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-    created_at: Mapped[str] = mapped_column(String, nullable=False, server_default=_NOW)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
     __table_args__ = (Index("idx_tasks_date", "task_date"),)
 
@@ -45,7 +47,9 @@ class Reminder(Base):
     enabled: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default="1"
     )
-    created_at: Mapped[str] = mapped_column(String, nullable=False, server_default=_NOW)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class Setting(Base):

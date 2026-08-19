@@ -1,5 +1,7 @@
 """Reminder request/response schemas."""
 
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -17,4 +19,4 @@ class ReminderOut(BaseModel):
     remind_time: str
     days: str
     enabled: int
-    created_at: str
+    created_at: datetime

@@ -141,7 +141,7 @@ def test_stats_streak_counts_consecutive_done_days(client):
     # done tasks for today, yesterday, and the day before -> streak of 3
     for offset in (0, 1, 2):
         client.post(f"{API}/tasks", json={"title": f"t{offset}", "task_date": iso(today - timedelta(days=offset))})
-    exec_sql("UPDATE tasks SET done = 1")
+    exec_sql("UPDATE tasks SET done = true")
 
     resp = client.get(f"{API}/stats")
     body = resp.json()
@@ -155,7 +155,7 @@ def test_stats_streak_survives_missing_today(client):
     """A morning visit before finishing anything shouldn't zero out yesterday's streak."""
     yesterday = date.today() - timedelta(days=1)
     client.post(f"{API}/tasks", json={"title": "t", "task_date": iso(yesterday)})
-    exec_sql("UPDATE tasks SET done = 1")
+    exec_sql("UPDATE tasks SET done = true")
 
     resp = client.get(f"{API}/stats")
     assert resp.json()["streak"] == 1
@@ -165,7 +165,7 @@ def test_stats_streak_broken_by_gap(client):
     today = date.today()
     client.post(f"{API}/tasks", json={"title": "t", "task_date": iso(today)})
     client.post(f"{API}/tasks", json={"title": "t2", "task_date": iso(today - timedelta(days=2))})
-    exec_sql("UPDATE tasks SET done = 1")
+    exec_sql("UPDATE tasks SET done = true")
 
     resp = client.get(f"{API}/stats")
     assert resp.json()["streak"] == 1

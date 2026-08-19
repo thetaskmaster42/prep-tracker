@@ -19,7 +19,11 @@ API_PREFIX = "/api/v1"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    run_migrations()
+    # In multi-replica k8s a dedicated migration Job owns schema changes, so startup
+    # migrations are disabled there (settings.run_migrations_on_startup=false) to avoid
+    # replicas racing on `alembic upgrade`.
+    if settings.run_migrations_on_startup:
+        run_migrations()
     yield
 
 
