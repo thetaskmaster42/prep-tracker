@@ -1,8 +1,14 @@
 # Prep Tracker
 
-A local daily work tracker with scheduled reminders, built for interview-prep discipline.
-FastAPI + SQLite backend, single-page vanilla JS frontend. No accounts, no cloud — your
-data lives in one SQLite file next to the app.
+A local daily work tracker with scheduled reminders, streaks, and GitHub/LeetCode activity
+charts — built for interview-prep discipline. No accounts, no cloud: your data lives in one
+SQLite file.
+
+Modular monorepo:
+
+- **`backend/`** — FastAPI + SQLAlchemy 2.0 REST API (`/api/v1`), Alembic migrations. SQLite
+  for local/tests; Postgres in production (via `DATABASE_URL`; CloudNativePG in k8s).
+- **`apps/web/`** — React + TypeScript + Vite single-page app that talks to the API.
 
 ## Features
 
@@ -10,103 +16,116 @@ data lives in one SQLite file next to the app.
   toward the streak when it has at least one *completed* task.
 - **Daily work log** — tasks with category (LeetCode, Project, Course, Behavioral, Writing,
   Applications, Other), planned minutes, and notes. Browse any day with the date arrows.
-- **Reminders** — set a time and optional weekdays (e.g. LeetCode at 19:00 on weekdays).
-  Fires a desktop notification (with your permission) and an in-page toast while the
-  page is open.
-- **GitHub / LeetCode activity charts** — a 30-day contribution/submission heatmap for
-  each, GitHub-calendar style: hover or focus a square for a tooltip with the exact
-  count and date.
+- **Reminders** — set a time and optional weekdays. Fires a desktop notification (with your
+  permission) and an in-page toast while the page is open.
+- **GitHub / LeetCode activity charts** — a 30-day contribution/submission heatmap for each,
+  GitHub-calendar style: hover or focus a square for a tooltip with the exact count and date.
 
-## Setup
+## Local development
 
-Dependencies are managed with [uv](https://docs.astral.sh/uv/).
+Two processes: the API and the Vite dev server (which proxies `/api` to the API).
 
 ```bash
+# terminal 1 — backend (http://127.0.0.1:8000)
+cd backend
 uv sync
-uv run uvicorn app:app --reload
+uv run alembic upgrade head
+uv run uvicorn app.main:app --reload
+
+# terminal 2 — frontend (http://127.0.0.1:5173)
+cd apps/web
+npm install
+npm run dev
 ```
 
-Open http://127.0.0.1:8000 — the database (`prep_tracker.db`) is created automatically
-on first run. Set `PREP_TRACKER_DB=/path/to/file.db` to point it elsewhere (used by the
-Docker image to keep the DB on a mounted volume).
+Open http://127.0.0.1:5173. The interactive API docs live at http://127.0.0.1:8000/docs.
+
+The database URL comes from `DATABASE_URL` (default: a local SQLite file next to the
+backend). The legacy `PREP_TRACKER_DB` path env var is still honored as a fallback.
 
 ## Tests
 
 ```bash
-uv run pytest
+cd backend && uv run pytest -v          # API + streak logic
+cd apps/web && npm run test             # component + scheduler tests (Vitest)
 ```
 
-Tests run against a temporary SQLite file (see `tests/conftest.py`) and mock the
-outbound GitHub/LeetCode calls, so they don't touch your real data or the network.
+Backend tests run against a temporary SQLite file and mock the outbound GitHub/LeetCode
+calls, so they never touch your real data or the network.
 
 ## Running in Docker / Kubernetes
 
-Build and run locally with Docker Compose (persists the DB in a named volume):
+The image is a single deployable: the frontend is built and the backend serves it alongside
+the API. Compose runs a prod-like stack (app + Postgres); the single app container runs
+`alembic upgrade head` on startup.
 
 ```bash
-docker compose up --build
+docker compose up --build            # http://localhost:8000 (app), Postgres in the `db` service
 ```
 
-Or build the image directly:
+### Kubernetes (Postgres via CloudNativePG)
+
+In production the app runs on Postgres provisioned by the
+[CloudNativePG](https://cloudnative-pg.io/) operator (install it first). The `k8s/` manifests are:
+
+- `postgres-cluster.yaml` — a 3-instance CNPG `Cluster`; the operator generates the
+  `prep-tracker-db-app` secret (with the connection `uri`) the app and migrate Job consume.
+- `migrate-job.yaml` — runs `alembic upgrade head` once per deploy so app pods never race on
+  migrations (it's an Argo CD pre-sync hook; with plain kubectl, run it before the Deployment).
+- `deployment.yaml` — the app, `replicas: 2` with `RollingUpdate`, `DATABASE_URL` from the CNPG
+  secret and `RUN_MIGRATIONS_ON_STARTUP=false` (the Job owns migrations).
+- `service.yaml` — ClusterIP.
 
 ```bash
-docker build -t prep-tracker .
-docker run -p 8000:8000 -v prep-tracker-data:/data prep-tracker
+kubectl apply -f k8s/postgres-cluster.yaml
+kubectl wait --for=condition=Ready cluster/prep-tracker-db --timeout=300s
+kubectl apply -f k8s/migrate-job.yaml
+kubectl wait --for=condition=complete job/prep-tracker-migrate --timeout=120s
+kubectl apply -f k8s/deployment.yaml -f k8s/service.yaml
 ```
 
-The image exposes `/healthz` for liveness/readiness checks. Kubernetes manifests
-(Deployment, PVC, Service) are in [`k8s/`](k8s/):
-
-```bash
-kubectl apply -f k8s/
-```
-
-**Note:** this app uses a single SQLite file, so the Deployment is pinned to
-`replicas: 1` — don't scale it out, since multiple pods writing to the same file over
-shared storage will corrupt it. If you outgrow that, swap SQLite for Postgres first.
+Because it's on Postgres now, the app scales past one replica — no single-writer constraint.
+The `DATABASE_URL` accepts a plain `postgresql://…` URI (the psycopg driver is pinned
+automatically). OpenBao can hold any other app secrets; the DB credential is taken straight
+from the CNPG-managed secret.
 
 ## CI/CD
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push/PR to `main`:
 
-1. **test** — `uv sync --frozen` + `uv run pytest`.
-2. **docker** — builds the image with Buildx (validates the Dockerfile on PRs too).
-   On pushes to `main`, after tests pass, it also pushes to
-   `ghcr.io/thetaskmaster42/prep-tracker`, tagged with the branch, short commit SHA,
-   and `latest`. No secrets to configure — it authenticates with the automatic
-   `GITHUB_TOKEN`. `k8s/deployment.yaml` already points at that image.
+1. **test** — backend `uv sync --frozen` + `uv run pytest -v`.
+2. **web** — frontend `npm ci`, typecheck, Vitest, and production build.
+3. **docker** — after both pass, builds the multi-arch image with Buildx. On pushes to
+   `main` it also pushes to `ghcr.io/thetaskmaster42/prep-tracker`, tagged with the branch,
+   short commit SHA, and `latest`. It authenticates with the automatic `GITHUB_TOKEN`.
 
-   The GHCR package may start **private**; if `kubectl` can't pull it, flip its
-   visibility to public (or add an `imagePullSecret`) from the package settings on
-   GitHub.
+## API (`/api/v1`)
 
-## API
-
-| Method | Path                           | Purpose                                         |
-| ------ | ------------------------------ | ----------------------------------------------- |
-| GET    | /api/tasks?day=YYYY-MM-DD      | Tasks for a day (default today)                 |
-| POST   | /api/tasks                     | Create a task                                   |
-| PATCH  | /api/tasks/{id}                | Update fields / toggle done                     |
-| DELETE | /api/tasks/{id}                | Delete a task                                   |
-| GET    | /api/reminders                 | List reminders                                  |
-| POST   | /api/reminders                 | Create a reminder                               |
-| PATCH  | /api/reminders/{id}/toggle     | Enable/disable a reminder                       |
-| DELETE | /api/reminders/{id}            | Delete a reminder                               |
-| GET    | /api/stats                     | Streaks, today totals, heatmap                  |
-| GET    | /api/settings                  | Get configured GitHub/LeetCode usernames        |
-| PUT    | /api/settings                  | Set GitHub/LeetCode usernames                   |
-| GET    | /api/github-streak             | Current GitHub contribution streak              |
-| GET    | /api/github-activity?days=30   | Daily GitHub contribution counts for the window |
-| GET    | /api/leetcode-streak           | Current LeetCode submission streak              |
-| GET    | /api/leetcode-activity?days=30 | Daily LeetCode submission counts for the window |
-| GET    | /healthz                       | Liveness/readiness check                        |
+| Method | Path                              | Purpose                                         |
+| ------ | --------------------------------- | ----------------------------------------------- |
+| GET    | /api/v1/categories                | Task categories                                 |
+| GET    | /api/v1/tasks?day=YYYY-MM-DD      | Tasks for a day (default today)                 |
+| POST   | /api/v1/tasks                     | Create a task                                   |
+| PATCH  | /api/v1/tasks/{id}                | Update fields / toggle done                     |
+| DELETE | /api/v1/tasks/{id}                | Delete a task                                   |
+| GET    | /api/v1/reminders                 | List reminders                                  |
+| POST   | /api/v1/reminders                 | Create a reminder                               |
+| PATCH  | /api/v1/reminders/{id}/toggle     | Enable/disable a reminder                       |
+| DELETE | /api/v1/reminders/{id}            | Delete a reminder                               |
+| GET    | /api/v1/stats                     | Streaks, today totals, heatmap                  |
+| GET    | /api/v1/settings                  | Get configured GitHub/LeetCode usernames        |
+| PUT    | /api/v1/settings                  | Set GitHub/LeetCode usernames                   |
+| GET    | /api/v1/github-streak             | Current GitHub contribution streak              |
+| GET    | /api/v1/github-activity?days=30   | Daily GitHub contribution counts for the window |
+| GET    | /api/v1/leetcode-streak           | Current LeetCode submission streak              |
+| GET    | /api/v1/leetcode-activity?days=30 | Daily LeetCode submission counts for the window |
+| GET    | /healthz                          | Liveness/readiness check (unversioned)          |
 
 ## Notes & ideas for extending it
 
-- Reminders fire client-side, so the tab must be open. A natural v2: a small
-  `apscheduler` job in the backend plus OS-level notifications, or a Web Push service
-  worker so reminders fire with the tab closed.
-- The GitHub/LeetCode streak lookups use unofficial public APIs (no auth token
-  required) and are cached in-process for 5 minutes per username.
-- Other easy extensions: weekly hours-by-category chart, CSV export, edit-in-place
-  for tasks, recurring task templates ("2 LeetCode mediums" auto-added daily).
+- Reminders fire client-side, so the tab must be open. A natural v2: a small scheduler in the
+  backend plus Web Push so reminders fire with the tab closed.
+- The GitHub/LeetCode streak lookups use unofficial public APIs (no auth token required) and
+  are cached in-process for 5 minutes per username.
+- Other easy extensions: weekly hours-by-category chart, CSV export, edit-in-place for tasks,
+  recurring task templates.

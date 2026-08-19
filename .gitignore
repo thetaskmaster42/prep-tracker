@@ -2,7 +2,6 @@
 __pycache__/
 *.py[oc]
 build/
-dist/
 wheels/
 *.egg-info
 .pytest_cache/
@@ -13,3 +12,13 @@ wheels/
 .python-version
 
 *.db
+
+# Node / frontend
+node_modules/
+apps/web/dist/
+
+# Built frontend bundle is a build artifact (produced by `npm run build`)
+backend/app/static/
+
+# Vite cache
+apps/web/.vite/

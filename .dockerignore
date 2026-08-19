@@ -1,12 +1,21 @@
-.venv
-__pycache__
+# Python
 **/__pycache__
 *.pyc
-.pytest_cache
+**/.venv
+**/.pytest_cache
+**/*.db
+
+# Node / frontend
+**/node_modules
+apps/web/dist
+backend/app/static
+
+# VCS & docs & infra not needed in the image
 .git
 .gitignore
-prep_tracker.db
-tests
-README.md
+**/README.md
 k8s
 docker-compose.yml
+
+# Tests are not needed at runtime
+backend/tests

@@ -1,11 +1,23 @@
 import json as json_module
 from datetime import date, datetime, timedelta, timezone
 
-import app as app_module
+from sqlalchemy import text
+
+from app.db.base import SessionLocal
+from app.services import streaks as streaks_module
+
+API = "/api/v1"
 
 
 def iso(d: date) -> str:
     return d.isoformat()
+
+
+def exec_sql(sql: str) -> None:
+    """Run a raw statement against the test DB (used to set up streak scenarios)."""
+    with SessionLocal() as session:
+        session.execute(text(sql))
+        session.commit()
 
 
 # ---------------------------------------------------------------- health / categories
@@ -17,7 +29,7 @@ def test_healthz(client):
 
 
 def test_categories(client):
-    resp = client.get("/api/categories")
+    resp = client.get(f"{API}/categories")
     assert resp.status_code == 200
     assert "LeetCode" in resp.json()
 
@@ -25,7 +37,7 @@ def test_categories(client):
 # ---------------------------------------------------------------- tasks
 
 def test_create_and_list_task(client):
-    resp = client.post("/api/tasks", json={"title": "2 mediums", "category": "LeetCode", "planned_min": 45})
+    resp = client.post(f"{API}/tasks", json={"title": "2 mediums", "category": "LeetCode", "planned_min": 45})
     assert resp.status_code == 201
     body = resp.json()
     assert body["title"] == "2 mediums"
@@ -33,90 +45,90 @@ def test_create_and_list_task(client):
     assert body["done"] is False
 
     today = date.today().isoformat()
-    resp = client.get(f"/api/tasks?day={today}")
+    resp = client.get(f"{API}/tasks?day={today}")
     assert resp.status_code == 200
     assert resp.json()["date"] == today
     assert len(resp.json()["tasks"]) == 1
 
 
 def test_create_task_rejects_bad_category(client):
-    resp = client.post("/api/tasks", json={"title": "x", "category": "Not-A-Category"})
+    resp = client.post(f"{API}/tasks", json={"title": "x", "category": "Not-A-Category"})
     assert resp.status_code == 400
 
 
 def test_create_task_rejects_bad_date(client):
-    resp = client.post("/api/tasks", json={"title": "x", "task_date": "not-a-date"})
+    resp = client.post(f"{API}/tasks", json={"title": "x", "task_date": "not-a-date"})
     assert resp.status_code == 400
 
 
 def test_patch_task_toggle_done(client):
-    created = client.post("/api/tasks", json={"title": "x"}).json()
-    resp = client.patch(f"/api/tasks/{created['id']}", json={"done": True})
+    created = client.post(f"{API}/tasks", json={"title": "x"}).json()
+    resp = client.patch(f"{API}/tasks/{created['id']}", json={"done": True})
     assert resp.status_code == 200
     assert resp.json()["done"] is True
 
 
 def test_patch_task_requires_fields(client):
-    created = client.post("/api/tasks", json={"title": "x"}).json()
-    resp = client.patch(f"/api/tasks/{created['id']}", json={})
+    created = client.post(f"{API}/tasks", json={"title": "x"}).json()
+    resp = client.patch(f"{API}/tasks/{created['id']}", json={})
     assert resp.status_code == 400
 
 
 def test_patch_missing_task_404(client):
-    resp = client.patch("/api/tasks/999999", json={"done": True})
+    resp = client.patch(f"{API}/tasks/999999", json={"done": True})
     assert resp.status_code == 404
 
 
 def test_delete_task(client):
-    created = client.post("/api/tasks", json={"title": "x"}).json()
-    resp = client.delete(f"/api/tasks/{created['id']}")
+    created = client.post(f"{API}/tasks", json={"title": "x"}).json()
+    resp = client.delete(f"{API}/tasks/{created['id']}")
     assert resp.status_code == 204
-    resp = client.delete(f"/api/tasks/{created['id']}")
+    resp = client.delete(f"{API}/tasks/{created['id']}")
     assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------- reminders
 
 def test_create_list_toggle_delete_reminder(client):
-    resp = client.post("/api/reminders", json={"title": "LeetCode hour", "remind_time": "19:00", "days": "0,2,4"})
+    resp = client.post(f"{API}/reminders", json={"title": "LeetCode hour", "remind_time": "19:00", "days": "0,2,4"})
     assert resp.status_code == 201
     rem = resp.json()
     assert rem["enabled"] == 1
 
-    resp = client.get("/api/reminders")
+    resp = client.get(f"{API}/reminders")
     assert len(resp.json()) == 1
 
-    resp = client.patch(f"/api/reminders/{rem['id']}/toggle")
+    resp = client.patch(f"{API}/reminders/{rem['id']}/toggle")
     assert resp.json()["enabled"] == 0
 
-    resp = client.delete(f"/api/reminders/{rem['id']}")
+    resp = client.delete(f"{API}/reminders/{rem['id']}")
     assert resp.status_code == 204
 
 
 def test_reminder_rejects_bad_time_format(client):
-    resp = client.post("/api/reminders", json={"title": "x", "remind_time": "7pm"})
+    resp = client.post(f"{API}/reminders", json={"title": "x", "remind_time": "7pm"})
     assert resp.status_code == 422  # fails the HH:MM pattern before reaching the handler
 
 
 def test_reminder_rejects_out_of_range_time(client):
-    resp = client.post("/api/reminders", json={"title": "x", "remind_time": "25:99"})
+    resp = client.post(f"{API}/reminders", json={"title": "x", "remind_time": "25:99"})
     assert resp.status_code == 400  # matches HH:MM pattern but fails the handler's range check
 
 
 def test_reminder_rejects_bad_days(client):
-    resp = client.post("/api/reminders", json={"title": "x", "remind_time": "09:00", "days": "9"})
+    resp = client.post(f"{API}/reminders", json={"title": "x", "remind_time": "09:00", "days": "9"})
     assert resp.status_code == 400
 
 
 def test_toggle_missing_reminder_404(client):
-    resp = client.patch("/api/reminders/999999/toggle")
+    resp = client.patch(f"{API}/reminders/999999/toggle")
     assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------- stats / streak
 
 def test_stats_empty(client):
-    resp = client.get("/api/stats")
+    resp = client.get(f"{API}/stats")
     assert resp.status_code == 200
     body = resp.json()
     assert body["streak"] == 0
@@ -128,11 +140,10 @@ def test_stats_streak_counts_consecutive_done_days(client):
     today = date.today()
     # done tasks for today, yesterday, and the day before -> streak of 3
     for offset in (0, 1, 2):
-        client.post("/api/tasks", json={"title": f"t{offset}", "task_date": iso(today - timedelta(days=offset))})
-    with app_module.db() as conn:
-        conn.execute("UPDATE tasks SET done = 1")
+        client.post(f"{API}/tasks", json={"title": f"t{offset}", "task_date": iso(today - timedelta(days=offset))})
+    exec_sql("UPDATE tasks SET done = true")
 
-    resp = client.get("/api/stats")
+    resp = client.get(f"{API}/stats")
     body = resp.json()
     assert body["streak"] == 3
     assert body["best_streak"] == 3
@@ -143,65 +154,63 @@ def test_stats_streak_counts_consecutive_done_days(client):
 def test_stats_streak_survives_missing_today(client):
     """A morning visit before finishing anything shouldn't zero out yesterday's streak."""
     yesterday = date.today() - timedelta(days=1)
-    client.post("/api/tasks", json={"title": "t", "task_date": iso(yesterday)})
-    with app_module.db() as conn:
-        conn.execute("UPDATE tasks SET done = 1")
+    client.post(f"{API}/tasks", json={"title": "t", "task_date": iso(yesterday)})
+    exec_sql("UPDATE tasks SET done = true")
 
-    resp = client.get("/api/stats")
+    resp = client.get(f"{API}/stats")
     assert resp.json()["streak"] == 1
 
 
 def test_stats_streak_broken_by_gap(client):
     today = date.today()
-    client.post("/api/tasks", json={"title": "t", "task_date": iso(today)})
-    client.post("/api/tasks", json={"title": "t2", "task_date": iso(today - timedelta(days=2))})
-    with app_module.db() as conn:
-        conn.execute("UPDATE tasks SET done = 1")
+    client.post(f"{API}/tasks", json={"title": "t", "task_date": iso(today)})
+    client.post(f"{API}/tasks", json={"title": "t2", "task_date": iso(today - timedelta(days=2))})
+    exec_sql("UPDATE tasks SET done = true")
 
-    resp = client.get("/api/stats")
+    resp = client.get(f"{API}/stats")
     assert resp.json()["streak"] == 1
 
 
 # ---------------------------------------------------------------- settings
 
 def test_settings_default_unset(client):
-    resp = client.get("/api/settings")
+    resp = client.get(f"{API}/settings")
     assert resp.json() == {"github_username": None, "leetcode_username": None}
 
 
 def test_settings_put_and_get(client):
-    resp = client.put("/api/settings", json={"github_username": "octocat", "leetcode_username": "coder"})
+    resp = client.put(f"{API}/settings", json={"github_username": "octocat", "leetcode_username": "coder"})
     assert resp.status_code == 200
     assert resp.json() == {"github_username": "octocat", "leetcode_username": "coder"}
 
-    resp = client.get("/api/settings")
+    resp = client.get(f"{API}/settings")
     assert resp.json() == {"github_username": "octocat", "leetcode_username": "coder"}
 
 
 def test_settings_put_empty_string_clears_value(client):
-    client.put("/api/settings", json={"github_username": "octocat"})
-    client.put("/api/settings", json={"github_username": ""})
-    resp = client.get("/api/settings")
+    client.put(f"{API}/settings", json={"github_username": "octocat"})
+    client.put(f"{API}/settings", json={"github_username": ""})
+    resp = client.get(f"{API}/settings")
     assert resp.json()["github_username"] is None
 
 
 def test_settings_put_partial_leaves_other_field(client):
-    client.put("/api/settings", json={"github_username": "octocat", "leetcode_username": "coder"})
-    client.put("/api/settings", json={"github_username": "new-name"})
-    resp = client.get("/api/settings")
+    client.put(f"{API}/settings", json={"github_username": "octocat", "leetcode_username": "coder"})
+    client.put(f"{API}/settings", json={"github_username": "new-name"})
+    resp = client.get(f"{API}/settings")
     assert resp.json() == {"github_username": "new-name", "leetcode_username": "coder"}
 
 
 # ---------------------------------------------------------------- external streaks
 
 def test_github_streak_unconfigured(client):
-    resp = client.get("/api/github-streak")
+    resp = client.get(f"{API}/github-streak")
     assert resp.status_code == 200
     assert resp.json() == {"configured": False}
 
 
 def test_leetcode_streak_unconfigured(client):
-    resp = client.get("/api/leetcode-streak")
+    resp = client.get(f"{API}/leetcode-streak")
     assert resp.status_code == 200
     assert resp.json() == {"configured": False}
 
@@ -211,10 +220,10 @@ def test_github_streak_configured(client, monkeypatch):
         assert username == "octocat"
         return {"username": username, "streak": 7}
 
-    monkeypatch.setattr(app_module, "fetch_github_streak", fake_fetch)
-    client.put("/api/settings", json={"github_username": "octocat"})
+    monkeypatch.setattr(streaks_module, "fetch_github_streak", fake_fetch)
+    client.put(f"{API}/settings", json={"github_username": "octocat"})
 
-    resp = client.get("/api/github-streak")
+    resp = client.get(f"{API}/github-streak")
     assert resp.status_code == 200
     assert resp.json() == {"configured": True, "username": "octocat", "streak": 7}
 
@@ -223,10 +232,10 @@ def test_leetcode_streak_configured(client, monkeypatch):
     async def fake_fetch(username):
         return {"username": username, "streak": 12, "total_active_days": 300}
 
-    monkeypatch.setattr(app_module, "fetch_leetcode_streak", fake_fetch)
-    client.put("/api/settings", json={"leetcode_username": "coder"})
+    monkeypatch.setattr(streaks_module, "fetch_leetcode_streak", fake_fetch)
+    client.put(f"{API}/settings", json={"leetcode_username": "coder"})
 
-    resp = client.get("/api/leetcode-streak")
+    resp = client.get(f"{API}/leetcode-streak")
     assert resp.status_code == 200
     body = resp.json()
     assert body["configured"] is True
@@ -240,15 +249,15 @@ def test_github_streak_propagates_upstream_failure(client, monkeypatch):
     async def fake_fetch(username):
         raise HTTPException(404, f"GitHub user '{username}' not found")
 
-    monkeypatch.setattr(app_module, "fetch_github_streak", fake_fetch)
-    client.put("/api/settings", json={"github_username": "nobody"})
+    monkeypatch.setattr(streaks_module, "fetch_github_streak", fake_fetch)
+    client.put(f"{API}/settings", json={"github_username": "nobody"})
 
-    resp = client.get("/api/github-streak")
+    resp = client.get(f"{API}/github-streak")
     assert resp.status_code == 404
 
 
 def test_github_activity_unconfigured(client):
-    resp = client.get("/api/github-activity")
+    resp = client.get(f"{API}/github-activity")
     assert resp.status_code == 200
     assert resp.json() == {"configured": False}
 
@@ -263,10 +272,10 @@ def test_github_activity_configured(client, monkeypatch):
             "total": 3,
         }
 
-    monkeypatch.setattr(app_module, "fetch_github_activity", fake_fetch)
-    client.put("/api/settings", json={"github_username": "octocat"})
+    monkeypatch.setattr(streaks_module, "fetch_github_activity", fake_fetch)
+    client.put(f"{API}/settings", json={"github_username": "octocat"})
 
-    resp = client.get("/api/github-activity")
+    resp = client.get(f"{API}/github-activity")
     assert resp.status_code == 200
     body = resp.json()
     assert body["configured"] is True
@@ -275,7 +284,7 @@ def test_github_activity_configured(client, monkeypatch):
 
 
 def test_github_activity_rejects_out_of_range_days(client):
-    resp = client.get("/api/github-activity?days=200")
+    resp = client.get(f"{API}/github-activity?days=200")
     assert resp.status_code == 400
 
 
@@ -289,9 +298,9 @@ def test_fetch_github_activity_shapes_30_day_window(monkeypatch):
             (today - timedelta(days=40)).isoformat(): {"count": 9, "level": 4},  # out of window
         }
 
-    monkeypatch.setattr(app_module, "_fetch_github_contributions", fake_contributions)
+    monkeypatch.setattr(streaks_module, "_fetch_github_contributions", fake_contributions)
 
-    result = asyncio.run(app_module.fetch_github_activity("octocat", days=30))
+    result = asyncio.run(streaks_module.fetch_github_activity("octocat", days=30))
     assert len(result["days"]) == 30
     assert result["days"][-1]["date"] == date.today().isoformat()
     assert result["days"][-2]["count"] == 2
@@ -302,7 +311,7 @@ def test_fetch_github_activity_shapes_30_day_window(monkeypatch):
 # ---------------------------------------------------------------- leetcode activity
 
 def test_leetcode_activity_unconfigured(client):
-    resp = client.get("/api/leetcode-activity")
+    resp = client.get(f"{API}/leetcode-activity")
     assert resp.status_code == 200
     assert resp.json() == {"configured": False}
 
@@ -317,10 +326,10 @@ def test_leetcode_activity_configured(client, monkeypatch):
             "total": 5,
         }
 
-    monkeypatch.setattr(app_module, "fetch_leetcode_activity", fake_fetch)
-    client.put("/api/settings", json={"leetcode_username": "coder"})
+    monkeypatch.setattr(streaks_module, "fetch_leetcode_activity", fake_fetch)
+    client.put(f"{API}/settings", json={"leetcode_username": "coder"})
 
-    resp = client.get("/api/leetcode-activity")
+    resp = client.get(f"{API}/leetcode-activity")
     assert resp.status_code == 200
     body = resp.json()
     assert body["configured"] is True
@@ -329,17 +338,17 @@ def test_leetcode_activity_configured(client, monkeypatch):
 
 
 def test_leetcode_activity_rejects_out_of_range_days(client):
-    resp = client.get("/api/leetcode-activity?days=0")
+    resp = client.get(f"{API}/leetcode-activity?days=0")
     assert resp.status_code == 400
 
 
 def test_leetcode_level_buckets():
-    assert app_module._leetcode_level(0) == 0
-    assert app_module._leetcode_level(1) == 1
-    assert app_module._leetcode_level(3) == 2
-    assert app_module._leetcode_level(6) == 3
-    assert app_module._leetcode_level(7) == 4
-    assert app_module._leetcode_level(50) == 4
+    assert streaks_module._leetcode_level(0) == 0
+    assert streaks_module._leetcode_level(1) == 1
+    assert streaks_module._leetcode_level(3) == 2
+    assert streaks_module._leetcode_level(6) == 3
+    assert streaks_module._leetcode_level(7) == 4
+    assert streaks_module._leetcode_level(50) == 4
 
 
 def test_fetch_leetcode_activity_shapes_30_day_window(monkeypatch):
@@ -352,9 +361,9 @@ def test_fetch_leetcode_activity_shapes_30_day_window(monkeypatch):
             (today - timedelta(days=40)).isoformat(): 9,  # out of window
         }
 
-    monkeypatch.setattr(app_module, "_fetch_leetcode_submissions", fake_submissions)
+    monkeypatch.setattr(streaks_module, "_fetch_leetcode_submissions", fake_submissions)
 
-    result = asyncio.run(app_module.fetch_leetcode_activity("coder", days=30))
+    result = asyncio.run(streaks_module.fetch_leetcode_activity("coder", days=30))
     assert len(result["days"]) == 30
     assert result["days"][-1]["date"] == date.today().isoformat()
     assert result["days"][-2]["count"] == 4
@@ -391,9 +400,9 @@ def test_fetch_leetcode_submissions_parses_calendar_and_merges_years(monkeypatch
                 "data": {"matchedUser": {"userCalendar": {"submissionCalendar": calendar}}}
             })
 
-    monkeypatch.setattr(app_module.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(streaks_module.httpx, "AsyncClient", FakeAsyncClient)
 
-    result = asyncio.run(app_module._fetch_leetcode_submissions("coder"))
+    result = asyncio.run(streaks_module._fetch_leetcode_submissions("coder"))
     today = date.today()
     assert result.get(date(today.year, 6, 1).isoformat()) == 2
     assert result.get(date(today.year - 1, 6, 1).isoformat()) == 2
@@ -424,15 +433,15 @@ def test_fetch_leetcode_streak_ignores_stale_api_streak_field(monkeypatch):
         async def post(self, *a, **kw):
             return FakeResponse()
 
-    monkeypatch.setattr(app_module.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(streaks_module.httpx, "AsyncClient", FakeAsyncClient)
 
     async def fake_submissions(username):
         stale_day = date.today() - timedelta(days=21)
         return {stale_day.isoformat(): 4}  # a real streak, but weeks in the past
 
-    monkeypatch.setattr(app_module, "_fetch_leetcode_submissions", fake_submissions)
+    monkeypatch.setattr(streaks_module, "_fetch_leetcode_submissions", fake_submissions)
 
-    result = asyncio.run(app_module.fetch_leetcode_streak("votrubac"))
+    result = asyncio.run(streaks_module.fetch_leetcode_streak("votrubac"))
     assert result["streak"] == 0
     assert result["total_active_days"] == 17
 
@@ -459,7 +468,7 @@ def test_fetch_leetcode_streak_counts_consecutive_days_ending_yesterday(monkeypa
         async def post(self, *a, **kw):
             return FakeResponse()
 
-    monkeypatch.setattr(app_module.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(streaks_module.httpx, "AsyncClient", FakeAsyncClient)
 
     async def fake_submissions(username):
         today = date.today()
@@ -468,9 +477,9 @@ def test_fetch_leetcode_streak_counts_consecutive_days_ending_yesterday(monkeypa
             (today - timedelta(days=2)).isoformat(): 1,
         }
 
-    monkeypatch.setattr(app_module, "_fetch_leetcode_submissions", fake_submissions)
+    monkeypatch.setattr(streaks_module, "_fetch_leetcode_submissions", fake_submissions)
 
-    result = asyncio.run(app_module.fetch_leetcode_streak("coder"))
+    result = asyncio.run(streaks_module.fetch_leetcode_streak("coder"))
     assert result["streak"] == 2
 
 
@@ -496,11 +505,11 @@ def test_fetch_leetcode_submissions_raises_404_for_missing_user(monkeypatch):
         async def post(self, *a, **kw):
             return FakeResponse()
 
-    monkeypatch.setattr(app_module.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(streaks_module.httpx, "AsyncClient", FakeAsyncClient)
 
     from fastapi import HTTPException
     try:
-        asyncio.run(app_module._fetch_leetcode_submissions("nobody"))
+        asyncio.run(streaks_module._fetch_leetcode_submissions("nobody"))
         assert False, "expected HTTPException"
     except HTTPException as exc:
         assert exc.status_code == 404

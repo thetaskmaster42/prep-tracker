@@ -1,5 +1,6 @@
-# SQLite-backed app: keep replicas at 1. Scaling out would give each pod its
-# own view of a shared file on ReadWriteOnce storage and corrupt writes.
+# Postgres-backed (CloudNativePG): safe to scale out. Schema migrations are owned by
+# the migrate Job (k8s/migrate-job.yaml), not the pods, so replicas don't race on
+# `alembic upgrade` — hence RUN_MIGRATIONS_ON_STARTUP=false below.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,9 +8,12 @@ metadata:
   labels:
     app: prep-tracker
 spec:
-  replicas: 1
+  replicas: 2
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: prep-tracker
@@ -25,11 +29,15 @@ spec:
           ports:
             - containerPort: 8000
           env:
-            - name: PREP_TRACKER_DB
-              value: /data/prep_tracker.db
-          volumeMounts:
-            - name: data
-              mountPath: /data
+            # Connection string from the CloudNativePG-generated secret (<cluster>-app).
+            # The app pins the psycopg driver automatically, so the plain URI works as-is.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: prep-tracker-db-app
+                  key: uri
+            - name: RUN_MIGRATIONS_ON_STARTUP
+              value: "false"
           readinessProbe:
             httpGet:
               path: /healthz
@@ -49,7 +57,3 @@ spec:
             limits:
               cpu: 250m
               memory: 256Mi
-      volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: prep-tracker-data

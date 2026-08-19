@@ -1,0 +1,30 @@
+[project]
+name = "prep-tracker"
+version = "0.2.0"
+description = "Local daily interview-prep tracker — FastAPI + SQLAlchemy backend."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.110",
+    "httpx>=0.28.1",
+    "uvicorn>=0.29",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "pydantic-settings>=2.2",
+    "psycopg[binary]>=3.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.uv]
+# This is a deployable application, not a library — don't try to build/install it as a
+# package. The code is imported from the working directory (uvicorn inserts cwd on sys.path;
+# pytest uses the pythonpath above).
+package = false
