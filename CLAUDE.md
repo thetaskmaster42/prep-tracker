@@ -71,6 +71,13 @@ top-level files:
 `Base.metadata` from the app so models and migrations don't drift. Tests create the schema
 directly with `Base.metadata.create_all` (they don't run Alembic).
 
+**SQLite/Postgres portability**: the app runs on both, so keep dialect-portable — models use
+`func.now()` / `false()` for defaults (never `datetime('now')`), and raw SQL in
+`services/stats.py` treats `done` as a boolean (`WHERE done`, `SUM(CASE WHEN done …)`, never
+`done = 1`). `config._normalize_url` pins the psycopg driver so a plain `postgresql://…` URL
+(e.g. the CloudNativePG secret) works. The CI `test-postgres` job runs the whole suite against
+real Postgres to catch drift.
+
 **Streak semantics**: a streak counts consecutive days *ending today or yesterday* — a day is
 only required to have activity once today has happened. This rule lives in exactly one place
 now, `services.streaks.current_streak`; the local, GitHub, and LeetCode streaks all pass it a
@@ -79,10 +86,12 @@ predicate. **External streaks are derived, not trusted from source**: LeetCode's
 in-app from the raw calendars; only `totalActiveDays` is taken as-is from LeetCode. These
 calls hit unofficial public APIs (no auth) and are cached per username for 5 minutes.
 
-**Single SQLite file** is a hard constraint: the app cannot run multiple replicas without
-corrupting the DB (`k8s/deployment.yaml` is pinned to `replicas: 1`). Pointing `DATABASE_URL`
-at Postgres is the prerequisite for any multi-instance deployment — the ORM/migration layer
-makes that a config change rather than a rewrite.
+**Deployment**: production runs on Postgres provisioned by the CloudNativePG operator
+(`k8s/postgres-cluster.yaml`); the app reads `DATABASE_URL` from the operator-generated
+`prep-tracker-db-app` secret and scales to `replicas: 2+` (no single-writer constraint).
+Migrations are owned by a one-shot Job (`k8s/migrate-job.yaml`) so replicas don't race — the
+app itself skips startup migrations there via `RUN_MIGRATIONS_ON_STARTUP=false`. Local dev and
+tests still use SQLite; `docker compose` runs a prod-like app+Postgres stack.
 
 ### Frontend (`apps/web/src/`)
 
@@ -113,8 +122,10 @@ backend serves the built bundle from `backend/app/static`.
 ## CI/CD
 
 `.github/workflows/ci.yml` runs on every push/PR to `main`: a `test` job (backend
-`uv sync --frozen` + `pytest -v`), a `web` job (`npm ci`, typecheck, Vitest, build), then a
-`docker` job (`needs: [test, web]`) that builds the multi-arch (amd64+arm64) image with Buildx
+`uv sync --frozen` + `pytest -v` on SQLite), a `test-postgres` job (same suite against a
+Postgres service container, after `alembic upgrade head`), a `web` job (`npm ci`, typecheck,
+Vitest, build), then a `docker` job (`needs: [test, test-postgres, web]`) that builds the
+multi-arch (amd64+arm64) image with Buildx
 and, only on pushes to `main`, pushes it to `ghcr.io/thetaskmaster42/prep-tracker` tagged with
 branch, short SHA, and `latest`. The Dockerfile is multi-stage: a Node stage builds the
 frontend, the Python stage serves it. `k8s/deployment.yaml` points at that image.

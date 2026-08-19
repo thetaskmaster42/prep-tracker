@@ -1,0 +1,31 @@
+# CloudNativePG cluster. The operator provisions Postgres + a primary ("-rw") service and
+# generates the `prep-tracker-db-app` secret (keys: uri, username, password, dbname, host,
+# port, ...) that the Deployment and migrate Job reference.
+#
+# Requires the CloudNativePG operator installed in the cluster:
+#   https://cloudnative-pg.io/documentation/current/installation_upgrade/
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: prep-tracker-db
+  labels:
+    app: prep-tracker
+spec:
+  instances: 3 # 1 primary + 2 replicas for HA / failover
+  primaryUpdateStrategy: unsupervised
+
+  bootstrap:
+    initdb:
+      database: prep_tracker
+      owner: prep
+
+  storage:
+    size: 1Gi
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi

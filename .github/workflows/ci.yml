@@ -26,6 +26,44 @@ jobs:
       - name: Run tests
         run: uv run pytest -v
 
+  # Runs the same suite against real Postgres so SQLite/Postgres dialect drift (boolean
+  # comparisons, timestamp defaults, migration DDL) can't slip through.
+  test-postgres:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: prep
+          POSTGRES_PASSWORD: prep
+          POSTGRES_DB: prep_tracker
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U prep -d prep_tracker"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://prep:prep@localhost:5432/prep_tracker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Apply migrations
+        run: uv run alembic upgrade head
+
+      - name: Run tests
+        run: uv run pytest -v
+
   web:
     runs-on: ubuntu-latest
     defaults:
@@ -54,7 +92,7 @@ jobs:
         run: npm run build -- --outDir dist --emptyOutDir
 
   docker:
-    needs: [test, web]
+    needs: [test, test-postgres, web]
     runs-on: ubuntu-latest
     permissions:
       contents: read

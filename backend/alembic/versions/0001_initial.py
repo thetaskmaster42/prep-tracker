@@ -15,8 +15,6 @@ down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-_NOW = sa.text("(datetime('now'))")
-
 
 def upgrade() -> None:
     op.create_table(
@@ -26,9 +24,14 @@ def upgrade() -> None:
         sa.Column("category", sa.String(), nullable=False, server_default="Other"),
         sa.Column("task_date", sa.String(), nullable=False),
         sa.Column("planned_min", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("done", sa.Boolean(), nullable=False, server_default="0"),
+        sa.Column("done", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("notes", sa.Text(), nullable=False, server_default=""),
-        sa.Column("created_at", sa.String(), nullable=False, server_default=_NOW),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
     )
     op.create_index("idx_tasks_date", "tasks", ["task_date"])
 
@@ -39,7 +42,12 @@ def upgrade() -> None:
         sa.Column("remind_time", sa.String(), nullable=False),
         sa.Column("days", sa.String(), nullable=False, server_default=""),
         sa.Column("enabled", sa.Integer(), nullable=False, server_default="1"),
-        sa.Column("created_at", sa.String(), nullable=False, server_default=_NOW),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
     )
 
     op.create_table(

@@ -11,11 +11,12 @@ from app.services.streaks import current_streak
 def compute_stats(db: Session) -> dict:
     today = date.today()
 
-    # Days that have at least one completed task.
+    # Days that have at least one completed task. `done` is a boolean, so compare it as a
+    # boolean (not `= 1`) and fold it with CASE — portable across SQLite and Postgres.
     rows = db.execute(
         text(
             "SELECT task_date, COUNT(*) AS done_count, SUM(planned_min) AS minutes "
-            "FROM tasks WHERE done = 1 GROUP BY task_date"
+            "FROM tasks WHERE done GROUP BY task_date"
         )
     ).mappings().all()
     done_days = {r["task_date"]: dict(r) for r in rows}
@@ -23,8 +24,8 @@ def compute_stats(db: Session) -> dict:
     today_row = db.execute(
         text(
             "SELECT COUNT(*) AS total, "
-            "SUM(done) AS done, "
-            "SUM(CASE WHEN done = 1 THEN planned_min ELSE 0 END) AS minutes_done "
+            "SUM(CASE WHEN done THEN 1 ELSE 0 END) AS done, "
+            "SUM(CASE WHEN done THEN planned_min ELSE 0 END) AS minutes_done "
             "FROM tasks WHERE task_date = :day"
         ),
         {"day": today.isoformat()},

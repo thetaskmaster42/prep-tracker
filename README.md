@@ -6,8 +6,8 @@ SQLite file.
 
 Modular monorepo:
 
-- **`backend/`** — FastAPI + SQLAlchemy 2.0 REST API (`/api/v1`), Alembic migrations, SQLite
-  by default (swap to Postgres via `DATABASE_URL`).
+- **`backend/`** — FastAPI + SQLAlchemy 2.0 REST API (`/api/v1`), Alembic migrations. SQLite
+  for local/tests; Postgres in production (via `DATABASE_URL`; CloudNativePG in k8s).
 - **`apps/web/`** — React + TypeScript + Vite single-page app that talks to the API.
 
 ## Features
@@ -56,31 +56,38 @@ calls, so they never touch your real data or the network.
 ## Running in Docker / Kubernetes
 
 The image is a single deployable: the frontend is built and the backend serves it alongside
-the API.
+the API. Compose runs a prod-like stack (app + Postgres); the single app container runs
+`alembic upgrade head` on startup.
 
 ```bash
-docker compose up --build            # http://localhost:8000
+docker compose up --build            # http://localhost:8000 (app), Postgres in the `db` service
 ```
 
-The image exposes `/healthz` for liveness/readiness checks and runs `alembic upgrade head`
-on startup. Kubernetes manifests (Deployment, PVC, Service) are in [`k8s/`](k8s/):
+### Kubernetes (Postgres via CloudNativePG)
+
+In production the app runs on Postgres provisioned by the
+[CloudNativePG](https://cloudnative-pg.io/) operator (install it first). The `k8s/` manifests are:
+
+- `postgres-cluster.yaml` — a 3-instance CNPG `Cluster`; the operator generates the
+  `prep-tracker-db-app` secret (with the connection `uri`) the app and migrate Job consume.
+- `migrate-job.yaml` — runs `alembic upgrade head` once per deploy so app pods never race on
+  migrations (it's an Argo CD pre-sync hook; with plain kubectl, run it before the Deployment).
+- `deployment.yaml` — the app, `replicas: 2` with `RollingUpdate`, `DATABASE_URL` from the CNPG
+  secret and `RUN_MIGRATIONS_ON_STARTUP=false` (the Job owns migrations).
+- `service.yaml` — ClusterIP.
 
 ```bash
-kubectl apply -f k8s/
+kubectl apply -f k8s/postgres-cluster.yaml
+kubectl wait --for=condition=Ready cluster/prep-tracker-db --timeout=300s
+kubectl apply -f k8s/migrate-job.yaml
+kubectl wait --for=condition=complete job/prep-tracker-migrate --timeout=120s
+kubectl apply -f k8s/deployment.yaml -f k8s/service.yaml
 ```
 
-**Note:** this app uses a single SQLite file, so the Deployment is pinned to `replicas: 1` —
-don't scale it out, since multiple pods writing to the same file over shared storage will
-corrupt it. To scale, point `DATABASE_URL` at Postgres first.
-
-### Migrating an existing SQLite database
-
-If you have a `prep_tracker.db` from the pre-migration (single-file) version, mark it as
-current before starting so Alembic doesn't try to recreate its tables:
-
-```bash
-cd backend && DATABASE_URL=sqlite:////path/to/prep_tracker.db uv run alembic stamp head
-```
+Because it's on Postgres now, the app scales past one replica — no single-writer constraint.
+The `DATABASE_URL` accepts a plain `postgresql://…` URI (the psycopg driver is pinned
+automatically). OpenBao can hold any other app secrets; the DB credential is taken straight
+from the CNPG-managed secret.
 
 ## CI/CD
 

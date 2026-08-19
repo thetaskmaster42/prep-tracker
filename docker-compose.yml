@@ -1,12 +1,29 @@
+# Prod-like local stack: the app on Postgres (matching k8s). The single app container runs
+# `alembic upgrade head` on startup, so no separate migration step is needed here.
 services:
+  db:
+    image: postgres:16
+    environment:
+      - POSTGRES_USER=prep
+      - POSTGRES_PASSWORD=prep
+      - POSTGRES_DB=prep_tracker
+    volumes:
+      - prep-tracker-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prep -d prep_tracker"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   prep-tracker:
     build: .
     ports:
       - "8000:8000"
-    volumes:
-      - prep-tracker-data:/data
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
-      - DATABASE_URL=sqlite:////data/prep_tracker.db
+      - DATABASE_URL=postgresql://prep:prep@db:5432/prep_tracker
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
       interval: 30s
@@ -14,4 +31,4 @@ services:
       start_period: 5s
 
 volumes:
-  prep-tracker-data:
+  prep-tracker-pgdata:

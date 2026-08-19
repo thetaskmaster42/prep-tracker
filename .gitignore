@@ -19,3 +19,6 @@ apps/web/dist/
 
 # Built frontend bundle is a build artifact (produced by `npm run build`)
 backend/app/static/
+
+# Vite cache
+apps/web/.vite/

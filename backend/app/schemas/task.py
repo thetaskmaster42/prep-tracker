@@ -1,5 +1,6 @@
 """Task request/response schemas."""
 
+from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -32,7 +33,7 @@ class TaskOut(BaseModel):
     planned_min: int
     done: bool
     notes: str
-    created_at: str
+    created_at: datetime
 
 
 class TaskListOut(BaseModel):
